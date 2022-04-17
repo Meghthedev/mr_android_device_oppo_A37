@@ -1,1 +1,1 @@
-allow mediaprovider unlabeled:dir { search getattr read open };
+allow mediaprovider sysfs:file read;

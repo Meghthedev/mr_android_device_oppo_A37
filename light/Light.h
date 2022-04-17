@@ -13,16 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 #ifndef ANDROID_HARDWARE_LIGHT_V2_0_LIGHT_H
 #define ANDROID_HARDWARE_LIGHT_V2_0_LIGHT_H
 
 #include <android/hardware/light/2.0/ILight.h>
+#include <hardware/lights.h>
 #include <hidl/Status.h>
-
-#include <fstream>
-#include <mutex>
 #include <unordered_map>
+#include <mutex>
 
 namespace android {
 namespace hardware {
@@ -30,32 +28,25 @@ namespace light {
 namespace V2_0 {
 namespace implementation {
 
-struct Light : public ILight {
-    Light(std::pair<std::ofstream, uint32_t>&& lcd_backlight,
-          std::ofstream&& charging_led, std::ofstream&& notification_led);
+using ::android::hardware::Return;
+using ::android::hardware::light::V2_0::ILight;
+using ::android::hardware::light::V2_0::LightState;
+using ::android::hardware::light::V2_0::Status;
+using ::android::hardware::light::V2_0::Type;
 
-    // Methods from ::android::hardware::light::V2_0::ILight follow.
+class Light : public ILight {
+  public:
+    Light();
+
     Return<Status> setLight(Type type, const LightState& state) override;
     Return<void> getSupportedTypes(getSupportedTypes_cb _hidl_cb) override;
 
   private:
-    void setBatteryLight(const LightState& state);
-    void setNotificationLight(const LightState& state);
-    void setLcdBacklight(const LightState& state);
-    void setSpeakerBatteryLightLocked();
-    void setSpeakerLightLocked(const LightState& state);
-    void setSpeakerNotificationLightLocked();
-    void setSpeakerNLightLocked(const LightState& state);
+    void handleWhiteLed(const LightState& state, size_t index);
 
-    std::pair<std::ofstream, uint32_t> mLcdBacklight;
-    std::ofstream mChargingLed;
-    std::ofstream mNotificationLed;
-
-    LightState mBatteryState;
-    LightState mNotificationState;
-
-    std::unordered_map<Type, std::function<void(const LightState&)>> mLights;
     std::mutex mLock;
+    std::unordered_map<Type, std::function<void(const LightState&)>> mLights;
+    std::array<LightState, 2> mLightStates;
 };
 
 }  // namespace implementation

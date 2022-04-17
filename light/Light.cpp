@@ -1,4 +1,7 @@
 /*
+ * Copyright (C) 2014, 2017-2018 The  Linux Foundation. All rights reserved.
+ * Not a contribution
+ * Copyright (C) 2008 The Android Open Source Project
  * Copyright (C) 2018 The LineageOS Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,27 +17,12 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "LightService"
+#define LOG_TAG "LightsService"
 
 #include "Light.h"
-
 #include <android-base/logging.h>
-
-namespace {
-using android::hardware::light::V2_0::LightState;
-
-static constexpr int DEFAULT_MAX_BRIGHTNESS = 255;
-
-static uint32_t rgbToBrightness(const LightState& state) {
-    uint32_t color = state.color & 0x00ffffff;
-    return ((77 * ((color >> 16) & 0xff)) + (150 * ((color >> 8) & 0xff)) +
-            (29 * (color & 0xff))) >> 8;
-}
-
-static bool isLit(const LightState& state) {
-    return (state.color & 0x00ffffff);
-}
-}  // anonymous namespace
+#include <android-base/stringprintf.h>
+#include <fstream>
 
 namespace android {
 namespace hardware {
@@ -42,29 +30,103 @@ namespace light {
 namespace V2_0 {
 namespace implementation {
 
-uint32_t green_status;
-
-Light::Light(std::pair<std::ofstream, uint32_t>&& lcd_backlight,
-             std::ofstream&& charging_led,
-             std::ofstream&& notification_led)
-    : mLcdBacklight(std::move(lcd_backlight)),
-      mChargingLed(std::move(charging_led)),
-      mNotificationLed(std::move(notification_led)) {
-    auto backlightFn(std::bind(&Light::setLcdBacklight, this, std::placeholders::_1));
-    auto batteryFn(std::bind(&Light::setBatteryLight, this, std::placeholders::_1));
-    auto notificationFn(std::bind(&Light::setNotificationLight, this, std::placeholders::_1));
-    mLights.emplace(std::make_pair(Type::BACKLIGHT, backlightFn));
-    mLights.emplace(std::make_pair(Type::BATTERY, batteryFn));
-    mLights.emplace(std::make_pair(Type::NOTIFICATIONS, notificationFn));
+/*
+ * Write value to path and close file.
+ */
+template <typename T>
+static void set(const std::string& path, const T& value) {
+    std::ofstream file(path);
+    file << value;
 }
 
-// Methods from ::android::hardware::light::V2_0::ILight follow.
+template <typename T>
+static T get(const std::string& path, const T& def) {
+    std::ifstream file(path);
+    T result;
+
+    file >> result;
+    return file.fail() ? def : result;
+}
+
+static int rgbToBrightness(const LightState& state) {
+    int color = state.color & 0x00ffffff;
+    return ((77 * ((color >> 16) & 0x00ff))
+            + (150 * ((color >> 8) & 0x00ff))
+            + (29 * (color & 0x00ff))) >> 8;
+}
+
+Light::Light() {
+    mLights.emplace(Type::ATTENTION, std::bind(&Light::handleWhiteLed, this, std::placeholders::_1, 0));
+    mLights.emplace(Type::BACKLIGHT,
+            [](const LightState& state) { set("/sys/class/leds/lcd-backlight/brightness", rgbToBrightness(state)); });
+    mLights.emplace(Type::BUTTONS,
+            [](const LightState& state) { set("/sys/class/leds/button-backlight/brightness", rgbToBrightness(state)); });
+    mLights.emplace(Type::NOTIFICATIONS, std::bind(&Light::handleWhiteLed, this, std::placeholders::_1, 1));
+}
+
+void Light::handleWhiteLed(const LightState& state, size_t index) {
+    mLightStates.at(index) = state;
+
+    LightState stateToUse = mLightStates.front();
+    for (const auto& lightState : mLightStates) {
+        if (lightState.color & 0xffffff) {
+            stateToUse = lightState;
+            break;
+        }
+    }
+
+    int brightness = rgbToBrightness(stateToUse);
+    static const char * const kLedFiles[] = {
+        "/sys/class/leds/red/brightness",
+        "/sys/class/leds/green/brightness",
+        "/sys/class/leds/blue/brightness"
+    };
+
+    for (size_t i = 0; i < sizeof(kLedFiles) / sizeof(kLedFiles[0]); i++) {
+        set(kLedFiles[i], brightness);
+    }
+
+    int onMs = stateToUse.flashMode == Flash::TIMED ? stateToUse.flashOnMs : 0;
+    int offMs = stateToUse.flashMode == Flash::TIMED ? stateToUse.flashOffMs : 0;
+    bool blink = onMs > 0 && offMs > 0;
+
+    if (blink) {
+        int totalMs = onMs + offMs;
+
+        // the LED appears to blink about once per second if freq is 20
+        // 1000ms / 20 = 50
+        int freq = totalMs / 50;
+        // pwm specifies the ratio of ON versus OFF
+        // pwm = 0 -> always off
+        // pwm = 255 => always on
+        int pwm = (onMs * 255) / totalMs;
+
+        if (pwm > 0 && pwm < 16) {
+            pwm = 16;
+        }
+
+        set("/sys/class/leds/red/device/grpfreq", freq);
+        set("/sys/class/leds/red/device/grppwm", pwm);
+    }
+    set("/sys/class/leds/red/device/blink", blink ? 1 : 0);
+
+    LOG(DEBUG) << base::StringPrintf(
+        "handleWhiteLed: mode=%d, color=%08X, onMs=%d, offMs=%d",
+        static_cast<std::underlying_type<Flash>::type>(stateToUse.flashMode), stateToUse.color,
+        onMs, offMs);
+}
+
 Return<Status> Light::setLight(Type type, const LightState& state) {
     auto it = mLights.find(type);
 
     if (it == mLights.end()) {
         return Status::LIGHT_NOT_SUPPORTED;
     }
+
+    /*
+     * Lock global mutex until light state is updated.
+     */
+    std::lock_guard<std::mutex> lock(mLock);
 
     it->second(state);
 
@@ -73,6 +135,7 @@ Return<Status> Light::setLight(Type type, const LightState& state) {
 
 Return<void> Light::getSupportedTypes(getSupportedTypes_cb _hidl_cb) {
     std::vector<Type> types;
+
     for (auto const& light : mLights) {
         types.push_back(light.first);
     }
@@ -80,67 +143,6 @@ Return<void> Light::getSupportedTypes(getSupportedTypes_cb _hidl_cb) {
     _hidl_cb(types);
 
     return Void();
-}
-
-void Light::setLcdBacklight(const LightState& state) {
-    std::lock_guard<std::mutex> lock(mLock);
-
-    uint32_t brightness = rgbToBrightness(state);
-
-    // If max panel brightness is not the default (255),
-    // apply linear scaling across the accepted range.
-    if (mLcdBacklight.second != DEFAULT_MAX_BRIGHTNESS) {
-        int old_brightness = brightness;
-        brightness = brightness * mLcdBacklight.second / DEFAULT_MAX_BRIGHTNESS;
-        LOG(VERBOSE) << "scaling brightness " << old_brightness << " => " << brightness;
-    }
-
-    mLcdBacklight.first << brightness << std::endl;
-}
-
-void Light::setBatteryLight(const LightState& state) {
-    std::lock_guard<std::mutex> lock(mLock);
-    mBatteryState = state;
-    setSpeakerBatteryLightLocked();
-}
-
-void Light::setSpeakerBatteryLightLocked() {
-    setSpeakerLightLocked(mBatteryState);
-}
-
-void Light::setSpeakerLightLocked(const LightState& state) {
-    if (isLit(state)) {
-        if(green_status == 0)
-            mChargingLed << DEFAULT_MAX_BRIGHTNESS << std::endl;
-    } else {
-        // Lights off
-        mChargingLed << 0 << std::endl;
-    }
-}
-
-void Light::setNotificationLight(const LightState& state) {
-    std::lock_guard<std::mutex> lock(mLock);
-    mNotificationState = state;
-    setSpeakerNotificationLightLocked();
-}
-
-void Light::setSpeakerNotificationLightLocked() {
-    setSpeakerNLightLocked(mNotificationState);
-}
-
-void Light::setSpeakerNLightLocked(const LightState& state) {
-    if (isLit(state)) {
-        mNotificationLed << DEFAULT_MAX_BRIGHTNESS << std::endl;
-        mChargingLed << 0 << std::endl;
-        green_status = 1;
-    } else {
-        // Lights off
-        mNotificationLed << 0 << std::endl;
-        if (isLit(mBatteryState))
-            mChargingLed << DEFAULT_MAX_BRIGHTNESS << std::endl;
-
-        green_status = 0;
-    }
 }
 
 }  // namespace implementation

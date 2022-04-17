@@ -1,1 +1,4 @@
-allow ueventd self:capability sys_admin;
+#============= ueventd ==============
+r_dir_file(ueventd, firmware_file)
+allow ueventd vfat:file { read open getattr };
+allow ueventd vfat:dir search;

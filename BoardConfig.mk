@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-DEVICE_PATH := device/lenovo/a6010
+DEVICE_PATH := device/oppo/A37
 
 # APEX
 TARGET_FLATTEN_APEX := true
@@ -29,7 +29,6 @@ TARGET_ARCH := arm
 TARGET_ARCH_VARIANT := armv8-a
 TARGET_CPU_ABI := armeabi-v7a
 TARGET_CPU_ABI2 := armeabi
-TARGET_CPU_CORTEX_A53 := true
 TARGET_CPU_VARIANT := cortex-a53
 TARGET_CPU_VARIANT_RUNTIME := cortex-a53
 TARGET_CPU_FEATURES := div,atomic_ldrd_strd
@@ -38,36 +37,39 @@ TARGET_CPU_FEATURES := div,atomic_ldrd_strd
 TARGET_USES_64_BIT_BINDER := true
 
 # Kernel
+BOARD_KERNEL_CMDLINE := console=ttyHSL0,115200,n8 androidboot.console=ttyHSL0 androidboot.hardware=qcom msm_rtb.filter=0x237 ehci-hcd.park=3 androidboot.bootdevice=7824900.sdhci lpm_levels.sleep_disabled=1 earlyprintk ramoops.mem_address=0x9ff00000 ramoops.mem_size=0x400000 ramoops.record_size=0x40000
 BOARD_KERNEL_BASE := 0x80000000
 BOARD_KERNEL_TAGS_OFFSET := 0x00000100
 BOARD_RAMDISK_OFFSET := 0x01000000
-BOARD_KERNEL_CMDLINE := console=ttyHSL0,115200,n8 androidboot.console=ttyHSL0 androidboot.hardware=qcom msm_rtb.filter=0x237 ehci-hcd.park=3 androidboot.bootdevice=7824900.sdhci lpm_levels.sleep_disabled=1 loop.max_part=7 pm.sleep_mode=1 vmalloc=400M  androidboot.memcg=true
 BOARD_KERNEL_PAGESIZE := 2048
-BOARD_KERNEL_IMAGE_NAME := zImage-dtb
-TARGET_KERNEL_SOURCE := kernel/lenovo/a6010
-TOP_PATH := $(realpath $(TOP))
-KERNEL_TOOLCHAIN := $(TOP_PATH)/prebuilts/gcc/$(HOST_OS)-x86/arm/arm-eabi/bin
-TARGET_KERNEL_CROSS_COMPILE_PREFIX := arm-len-linux-gnueabi-
-TARGET_KERNEL_CONFIG := lineageos_a6010_defconfig
+BOARD_KERNEL_OFFSET := 0x00008000
+BOARD_KERNEL_CMDLINE += androidboot.selinux=permissive
+BOARD_MKBOOTIMG_ARGS += --ramdisk_offset 0x01000000 --tags_offset 0x00000100
+BOARD_KERNEL_IMAGE_NAME := Image
+TARGET_KERNEL_SOURCE := kernel/oppo/msm8939
+BOARD_KERNEL_SEPARATED_DT := true
+TARGET_KERNEL_ARCH := arm64
+TARGET_CUSTOM_DTBTOOL := dtbToolOppo
+TARGET_KERNEL_CONFIG := lineageos_a37f_defconfig
 
 # Ramdisk compression
 LZMA_RAMDISK_TARGETS := boot
 
 # File System
-TARGET_FS_CONFIG_GEN := $(DEVICE_PATH)/config.fs
+TARGET_FS_CONFIG_GEN := $(PLATFORM_PATH)/config.fs
 BOARD_FLASH_BLOCK_SIZE := 131072
 BOARD_BOOTIMAGE_PARTITION_SIZE := 33554432
-BOARD_CACHEIMAGE_PARTITION_SIZE := 265289728
+BOARD_CACHEIMAGE_PARTITION_SIZE := 126877696
 BOARD_CACHEIMAGE_FILE_SYSTEM_TYPE := ext4
-BOARD_PERSISTIMAGE_PARTITION_SIZE := 28311552
+BOARD_PERSISTIMAGE_PARTITION_SIZE := 33554432
 BOARD_RECOVERYIMAGE_PARTITION_SIZE := 33554432
-BOARD_SYSTEMIMAGE_PARTITION_SIZE := 1887436800
-BOARD_USERDATAIMAGE_PARTITION_SIZE := 13295385600
+BOARD_SYSTEMIMAGE_PARTITION_SIZE := 2859466752
+BOARD_USERDATAIMAGE_PARTITION_SIZE := 11632902144
 TARGET_USERIMAGES_USE_EXT4 := true
+TARGET_USERIMAGES_USE_F2FS := true
 BOARD_SUPPRESS_EMMC_WIPE := true
-TARGET_KERNEL_HAVE_EXFAT := true
-TARGET_EXFAT_DRIVER := exfat
-TARGET_RECOVERY_FSTAB := $(DEVICE_PATH)/rootdir/etc/fstab.qcom
+TARGET_EXFAT_DRIVER := sdfat
+TARGET_RECOVERY_FSTAB := $(PLATFORM_PATH)/rootdir/etc/fstab.qcom
 TARGET_USES_MKE2FS := true
 BOARD_ROOT_EXTRA_FOLDERS := firmware persist
 
@@ -96,6 +98,7 @@ MALLOC_SVELTE := true
 
 # HIDL
 DEVICE_MANIFEST_FILE := $(DEVICE_PATH)/manifest.xml
+DEVICE_MATRIX_FILE := $(PLATFORM_PATH)/compatibility_matrix.xml
 PRODUCT_VENDOR_MOVE_ENABLED := true
 
 # Display
@@ -161,6 +164,9 @@ BOARD_HAVE_BLUETOOTH := true
 BOARD_HAVE_BLUETOOTH_QCOM := true
 QCOM_BT_READ_ADDR_FROM_PROP := true
 
+# Lights
+TARGET_PROVIDES_LIBLIGHT := true
+
 # Charger
 BOARD_CHARGER_ENABLE_SUSPEND := true
 BOARD_CHARGER_DISABLE_INIT_BLANK := true
@@ -169,6 +175,7 @@ BACKLIGHT_PATH := /sys/class/leds/lcd-backlight/brightness
 # Encryption
 TARGET_HW_DISK_ENCRYPTION := true
 TARGET_LEGACY_HW_DISK_ENCRYPTION := true
+TARGET_KEYMASTER_WAIT_FOR_QSEE := true
 
 # FM (Wired Radio)
 AUDIO_FEATURE_ENABLED_FM_POWER_OPT := true
@@ -179,9 +186,11 @@ TARGET_QCOM_NO_FM_FIRMWARE := true
 TARGET_USES_MEDIA_EXTENSIONS := true
 
 # Camera
-BOARD_CAMERA_SENSORS := imx219_q8n13a gc2355_8916
+BOARD_GLOBAL_CFLAGS += -DCAMERA_VENDOR_L_COMPAT
+BOARD_GLOBAL_CFLAGS += -DCONFIG_OPPO_CAMERA_51
 TARGET_USE_VENDOR_CAMERA_EXT := true
 USE_DEVICE_SPECIFIC_CAMERA := true
+TARGET_HAS_LEGACY_CAMERA_HAL1 := true
 TARGET_PROCESS_SDK_VERSION_OVERRIDE := \
 	/system/bin/mediaserver=22 \
         /system/bin/cameraserver=22 \
@@ -191,6 +200,12 @@ TARGET_PROCESS_SDK_VERSION_OVERRIDE := \
 TARGET_NO_RPC := true
 USE_DEVICE_SPECIFIC_GPS := true
 SELINUX_IGNORE_NEVERALLOWS := true
+
+# Shim
+TARGET_LD_SHIM_LIBS := \
+    /system/vendor/lib/libmmcamera2_stats_modules.so|libshim_camera.so \
+    /system/vendor/lib/libmmcamera2_stats_algorithm.so|libcamera_shim.so \
+    /system/vendor/lib/hw/camera.vendor.msm8916.so|libshim_camera.so
 
 # SEpolicy
 BOARD_SEPOLICY_DIRS += \
@@ -217,3 +232,6 @@ TARGET_DISABLE_WCNSS_CONFIG_COPY := true
 DISABLE_APEX_TEST_MODULE := true
 # Proprietary Prebuilt
 -include vendor/lenovo/a6010/BoardConfigVendor.mk
+
+# Proprietary Prebuilt
+-include vendor/oppo/A37/BoardConfigVendor.mk
